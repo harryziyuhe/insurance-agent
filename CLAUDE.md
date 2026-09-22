@@ -102,18 +102,45 @@ outright by `@dataclass` (mutable literal default) or, if it slips through as `N
 
 ### The "deterministic now, LLM-shaped later" boundary
 
-`app/extraction.py` (`extract()`), and the various keyword classifiers (`classify_intent`,
-`_is_done`, `_wants_different_case`, `_parse_yes_no`, `_find_mentioned_document`,
-`_mentions_not_having_it`) are all regex/keyword **stubs** standing in for a future real LLM
-call — this is intentional, not a shortcut to clean up. `app/llm_client.py`, `app/pipeline.py`,
-`app/scope_guard.py`, `app/emotion.py`, and `app/guardrail.py` are placeholder files for that
-next milestone (real Anthropic API extraction, out-of-scope/emotion detection, and the
-post-generation disclosure guardrail — see `ARCHITECTURE.md` §8-12) and are currently empty.
+The LLM serves exactly two purposes in this system, and only two. Everything else — phase
+transitions, identity matching, ownership checks, the email-consent gate, tool-layer lookups —
+stays code-enforced regardless of whether an LLM is involved.
 
-When that swap happens, the rule is: replace only the "understand messy free text" functions
-with structured LLM output — the deterministic policy code they feed into (identity matching,
-ownership checks, phase-transition conditions, the email-consent gate, tool-layer lookups)
-does not change and must stay code-enforced regardless of whether an LLM is involved.
+1. **`understand()`** — messy user text → structured data. One combined call per turn, one
+   schema, replacing `app/extraction.py::extract()` and every keyword classifier that used to
+   live in `resolve_intent.py`/`process_case.py`/`post_process.py` (`classify_intent`,
+   `_is_done`, `_wants_different_case`, `_parse_yes_no`, `_find_mentioned_document`,
+   `_mentions_not_having_it`), plus out-of-scope detection and emotion detection (frustration /
+   anxiety / anger / confusion / refusal) as additional fields on the same schema — they're all
+   just different questions asked of the same turn, so one call answers all of them instead of
+   four-to-six separate LLM round trips. Every field is optional/nullable; a miss on one field
+   doesn't block the others. Output still **merges** into `SessionState`, never overwrites — the
+   "VERIFY_ID never acts on `intent_hint`, only stores it" guarantee is unchanged because that
+   rule lives in `verify_id.py`'s code, not in what `understand()` returns.
+2. **`respond()`** — decided facts → natural language. Called once, after a phase controller has
+   already decided what to disclose and what to do next. Takes only the specific facts/next-action
+   the controller explicitly passes in — never raw session state or raw claim records — so the
+   LLM cannot leak what it was never given. Replaces the hardcoded reply strings in each
+   `sop/<phase>.py`.
+
+`app/llm_client.py` is a dumb transport: `call_llm(system, user, schema) -> dict`, wrapping
+**Gemini's free tier** (`google-genai`, `GEMINI_API_KEY` env var, structured output via
+`response_schema`) — not Anthropic; picked for zero-cost iteration during development. It raises
+`LLMUnavailable` on any failure (rate limit, network, malformed response) rather than guessing.
+`app/pipeline.py` defines `understand()`/`respond()` on top of it and is the only file that knows
+both calls exist; phase controllers keep calling narrow functions exactly like today, unaware
+they're now LLM-backed.
+
+Every call site built on `understand()`/`respond()` must keep its current regex/keyword/template
+implementation as a fallback on `LLMUnavailable` — this keeps the dev loop free-tier-safe and the
+empty test scaffold runnable offline.
+
+`app/scope_guard.py` and `app/emotion.py` are **not** separate LLM call sites — their outputs
+are fields on the `understand()` schema; code in `pipeline.py` reads those fields to track the
+off-topic retry counter and decide when to escalate to `HUMAN_HANDOFF`. `app/guardrail.py` is a
+**deterministic code check, not an LLM call** — it compares a drafted reply from `respond()`
+against the explicit whitelist of facts the controller passed in, so the disclosure gate never
+depends on a second model call being available or correct.
 
 ### Fixtures (`fixtures/*.json`) — the mock claims DB
 
