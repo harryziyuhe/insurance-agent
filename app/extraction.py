@@ -16,6 +16,12 @@ class ExtractedTurn:
     intent_hint: str | None = None
     caller_role: str | None = None  # "self" | "representative" | None
     rep_relationship: str | None = None
+    yes_no: str | None = None
+    mentioned_document: str | None = None
+    wants_different_case: bool = False
+    is_done: bool = False
+    in_scope: bool = True
+    emotion: str = "neutral"
 
 
 _NAME_RE = re.compile(r"(?:my name is|this is)\s+([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)+)", re.IGNORECASE)
