@@ -18,6 +18,8 @@ class ExtractedTurn:
     rep_relationship: str | None = None
     yes_no: str | None = None
     mentioned_document: str | None = None
+    intent_category: str | None = None  # denial_question | document_submission | status_inquiry | next_steps | general_claim_question
+    lacks_document: bool = False
     wants_different_case: bool = False
     is_done: bool = False
     in_scope: bool = True
@@ -34,7 +36,11 @@ _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 # also a YYYY-MM-DD date, to avoid matching a DOB as a phone number.
 _PHONE_RE = re.compile(r"(\+\d[\d\-\s]{8,14}\d)")
 _INTENT_RE = re.compile(
-    r"calling about\s+(.+?)(?:\.\s|\.$|,\s*(?:dob|my dob)|$)", re.IGNORECASE
+    # Tolerates filler between "calling" and "about"/"regarding"
+    # ("calling today about...", "calling in about...") instead of requiring
+    # the exact literal phrase "calling about".
+    r"calling(?:\s+\w+){0,3}\s+(?:about|regarding)\s+(.+?)(?:\.\s|\.$|,\s*(?:dob|my dob)|$)",
+    re.IGNORECASE,
 )
 _REP_RE = re.compile(
     r"\b(on behalf of|calling for|i'?m (?:her|his|their) (son|daughter|spouse|husband|wife))\b",
@@ -42,7 +48,7 @@ _REP_RE = re.compile(
 )
 
 
-def extract(user_text: str) -> ExtractedTurn:
+def regex_fallback_extract(user_text: str) -> ExtractedTurn:
     out = ExtractedTurn()
 
     if m := _NAME_RE.search(user_text):
