@@ -7,8 +7,41 @@ when the >=3-field gate is satisfied.
 """
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from app.fixtures_data import POLICYHOLDERS, REPRESENTATIVES
+
+# Formats a caller might plausibly say a date of birth in. Tried in order;
+# first one that parses wins. Kept deliberately plain-code (no dateutil dep)
+# since this feeds an auditable verification decision.
+_DOB_FORMATS = [
+    "%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y", "%Y%m%d",
+    "%B %d, %Y", "%B %d %Y", "%d %B %Y", "%Y %B %d",
+    "%b %d, %Y", "%b %d %Y", "%d %b %Y", "%Y %b %d",
+]
+
+
+# A date-shaped substring, tried when the full string doesn't parse outright —
+# guards against filler words around the actual date ("dob is March 15, 1985",
+# "on 1985-03-15") from whatever produced the string (caller phrasing, or an
+# LLM extraction that echoed a bit more of the sentence than just the value).
+_DATE_SUBSTRING_RE = re.compile(
+    r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{4}|\d{8}\b|"
+    r"[A-Za-z]+\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+[A-Za-z]+\.?\s+\d{4}|\d{4}\s+[A-Za-z]+\.?\s+\d{1,2}"
+)
+
+
+def _parse_date(s: str | None):
+    if not s:
+        return None
+    text = re.sub(r"\s+", " ", s.strip())
+    for candidate in (text, *(m.group(0) for m in _DATE_SUBSTRING_RE.finditer(text))):
+        for fmt in _DOB_FORMATS:
+            try:
+                return datetime.strptime(candidate, fmt).date()
+            except ValueError:
+                continue
+    return None
 
 # Fields that count toward the >=3-of-5 requirement. Policy number is accepted
 # as a narrowing hint but does not count (see ARCHITECTURE.md §7).
@@ -48,6 +81,12 @@ def _email_matches(claimed: str, record: dict) -> bool:
 
 
 def _dob_matches(claimed: str, record: dict) -> bool:
+    claimed_date = _parse_date(claimed)
+    record_date = _parse_date(record.get("dob"))
+    if claimed_date and record_date:
+        return claimed_date == record_date
+    # Neither side parsed cleanly (unexpected format) — fall back to the
+    # literal string comparison rather than silently rejecting the match.
     return _norm(claimed) == _norm(record.get("dob"))
 
 
