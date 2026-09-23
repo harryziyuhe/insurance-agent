@@ -4,21 +4,23 @@
 <meta charset="utf-8" />
 <title>Insurance Claims SOP Agent — Test UI</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; display: flex; gap: 1.5rem; }
-  #chat-col { flex: 2; }
-  #debug-col { flex: 1; font-size: 0.85rem; background: #f4f4f4; padding: 0.75rem; border-radius: 6px; }
+  body { font-family: system-ui, sans-serif; max-width: 1300px; margin: 2rem auto; display: flex; gap: 1.5rem; }
+  #chat-col { flex: 1; min-width: 0; }
+  #debug-col { flex: 1; min-width: 0; font-size: 0.8rem; background: #f4f4f4; padding: 0.75rem; border-radius: 6px; max-height: 90vh; overflow-y: auto; }
   #log { border: 1px solid #ccc; border-radius: 6px; height: 420px; overflow-y: auto; padding: 0.75rem; margin-bottom: 0.5rem; }
   .msg { margin: 0.4rem 0; }
   .user { text-align: right; color: #1a4; }
   .agent { text-align: left; color: #333; }
   #row { display: flex; gap: 0.5rem; }
   #text { flex: 1; padding: 0.4rem; }
-  pre { white-space: pre-wrap; word-break: break-word; }
+  pre { white-space: pre-wrap; word-break: break-word; background: #fff; border: 1px solid #ddd; border-radius: 4px; padding: 0.5rem; margin: 0.25rem 0 0.75rem; }
+  .debug-section summary { cursor: pointer; font-weight: 600; margin: 0.4rem 0 0.1rem; }
+  .summary-row { margin: 0.15rem 0; }
 </style>
 </head>
 <body>
   <div id="chat-col">
-    <h2>Insurance Claims SOP Agent</h2>
+    <h2>Insurance Claims Agent</h2>
     <div id="log"></div>
     <div id="row">
       <input id="text" placeholder="Type a message..." autofocus />
@@ -26,10 +28,55 @@
     </div>
   </div>
   <div id="debug-col">
-    <h3>Debug</h3>
-    <div><b>Phase:</b> <span id="phase">-</span></div>
-    <div><b>Verified:</b> <span id="verified">-</span></div>
-    <div><b>Matched fields:</b> <span id="matched">-</span></div>
+    <h3>Debug <button id="refresh" style="font-size:0.75rem;">refresh</button></h3>
+    <div class="summary-row"><b>Phase:</b> <span id="phase">-</span></div>
+    <div class="summary-row"><b>Verified:</b> <span id="verified">-</span></div>
+    <div class="summary-row"><b>Matched fields:</b> <span id="matched">-</span></div>
+
+    <details class="debug-section" open>
+      <summary>Last extracted (understand() output)</summary>
+      <pre id="dbg-extracted">-</pre>
+    </details>
+
+    <details class="debug-section" open>
+      <summary>Identity</summary>
+      <pre id="dbg-identity">-</pre>
+    </details>
+
+    <details class="debug-section" open>
+      <summary>Memory</summary>
+      <pre id="dbg-memory">-</pre>
+    </details>
+
+    <details class="debug-section">
+      <summary>Intent</summary>
+      <pre id="dbg-intent">-</pre>
+    </details>
+
+    <details class="debug-section">
+      <summary>Case</summary>
+      <pre id="dbg-case">-</pre>
+    </details>
+
+    <details class="debug-section">
+      <summary>Post-process</summary>
+      <pre id="dbg-postprocess">-</pre>
+    </details>
+
+    <details class="debug-section">
+      <summary>Off-topic streak</summary>
+      <pre id="dbg-offtopic">-</pre>
+    </details>
+
+    <details class="debug-section">
+      <summary>Turns (full transcript)</summary>
+      <pre id="dbg-turns">-</pre>
+    </details>
+
+    <details class="debug-section">
+      <summary>Raw session state (everything)</summary>
+      <pre id="dbg-raw">-</pre>
+    </details>
   </div>
 
 <script>
@@ -52,6 +99,31 @@ function appendMsg(role, text) {
   log.scrollTop = log.scrollHeight;
 }
 
+function setPre(id, value) {
+  document.getElementById(id).textContent = JSON.stringify(value, null, 2);
+}
+
+async function refreshDebug() {
+  if (!sessionId) return;
+  const res = await fetch(`/api/session/${sessionId}/state`);
+  if (!res.ok) return;
+  const state = await res.json();
+
+  document.getElementById("phase").textContent = state.phase;
+  document.getElementById("verified").textContent = state.identity?.verified;
+  document.getElementById("matched").textContent = (state.identity?.matched_fields || []).join(", ") || "-";
+
+  setPre("dbg-extracted", state.last_extracted);
+  setPre("dbg-identity", state.identity);
+  setPre("dbg-memory", state.memory);
+  setPre("dbg-intent", state.intent);
+  setPre("dbg-case", state.case);
+  setPre("dbg-postprocess", state.post_process);
+  setPre("dbg-offtopic", state.off_topic_streak);
+  setPre("dbg-turns", state.turns);
+  setPre("dbg-raw", state);
+}
+
 async function send() {
   const input = document.getElementById("text");
   const text = input.value.trim();
@@ -67,15 +139,14 @@ async function send() {
   });
   const data = await res.json();
   appendMsg("agent", data.reply);
-  document.getElementById("phase").textContent = data.phase;
-  document.getElementById("verified").textContent = data.verified;
-  document.getElementById("matched").textContent = (data.matched_fields || []).join(", ") || "-";
+  await refreshDebug();
 }
 
 document.getElementById("send").addEventListener("click", send);
 document.getElementById("text").addEventListener("keydown", (e) => {
   if (e.key === "Enter") send();
 });
+document.getElementById("refresh").addEventListener("click", refreshDebug);
 </script>
 </body>
 </html>
