@@ -1,6 +1,3 @@
-"""Loads the fixtures/*.json files once at import time into plain Python
-structures. This is the "mock database" for the demo — see ARCHITECTURE.md §11.
-"""
 import json
 from pathlib import Path
 
@@ -29,6 +26,7 @@ def claims_by_party_id() -> dict:
     for c in CLAIMS:
         out.setdefault(c["party_id"], []).append(c)
     return out
+
 
 def claims_by_case_id() -> dict:
     out: dict[str, list] = {}
