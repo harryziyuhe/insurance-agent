@@ -60,6 +60,8 @@ class SessionState:
     intent: IntentState = field(default_factory=IntentState)
     case: CaseState = field(default_factory=CaseState)
     post_process: PostProcessState = field(default_factory=PostProcessState)
+    off_topic_streak: int = 0
+    last_extracted: dict = field(default_factory=dict)  # debug: understand() output for the most recent turn
 
 # In-memory store for the demo. Swap for Redis if the process needs to
 # restart without losing live sessions (see ARCHITECTURE.md §4).
