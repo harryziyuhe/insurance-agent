@@ -15,8 +15,11 @@ def handle_turn(session: SessionState, user_text: str, extracted: ExtractedTurn)
         return process_case.handle(session, user_text, extracted)
     if session.phase == Phase.POST_PROCESS:
         return post_process.handle(session, user_text, extracted)
-    # Placeholder until RESOLVE_INTENT/PROCESS_CASE/POST_PROCESS are built.
+    # HUMAN_HANDOFF has no controller yet (ARCHITECTURE.md: "not yet wired to
+    # anything") — this only fires on a turn *after* the handoff message
+    # itself, since that message is returned directly by whichever phase
+    # triggered the escalation.
     return (
-        f"[{session.phase.value} isn't implemented yet in this milestone. "
-        "You're verified — this is where intent resolution would continue.]"
+        "You've been connected to a human representative queue — "
+        "someone will be with you shortly."
     )
