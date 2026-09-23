@@ -1,11 +1,3 @@
-"""STUB extraction step (ARCHITECTURE.md §5 step 1 / §8).
-
-This is a placeholder for the real LLM structured-extraction call. It uses
-plain regex/keyword heuristics so we can verify the session/pipeline plumbing
-end-to-end before any API key is wired in. Swap `extract()` for a real
-Anthropic structured-output call later — callers of this module (the pipeline)
-don't need to change, since the return shape stays the same.
-"""
 import re
 from dataclasses import dataclass, field
 
@@ -18,7 +10,9 @@ class ExtractedTurn:
     rep_relationship: str | None = None
     yes_no: str | None = None
     mentioned_document: str | None = None
-    intent_category: str | None = None  # denial_question | document_submission | status_inquiry | next_steps | general_claim_question
+    intent_category: str | None = (
+        None  # denial_question | document_submission | status_inquiry | next_steps | general_claim_question
+    )
     lacks_document: bool = False
     wants_different_case: bool = False
     is_done: bool = False
@@ -26,19 +20,17 @@ class ExtractedTurn:
     emotion: str = "neutral"
 
 
-_NAME_RE = re.compile(r"(?:my name is|this is)\s+([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)+)", re.IGNORECASE)
+_NAME_RE = re.compile(
+    r"(?:my name is|this is)\s+([A-Z][a-zA-Z'-]+(?:\s+[A-Z][a-zA-Z'-]+)+)",
+    re.IGNORECASE,
+)
 _DOB_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 _POLICY_RE = re.compile(r"\b(POL-\d+)\b", re.IGNORECASE)
 _SSN4_RE = re.compile(r"(?:ssn|social security|id)[^\d]{0,20}(\d{4})\b", re.IGNORECASE)
 _LAST_FOUR_RE = re.compile(r"last\s*(?:four|4)\D{0,10}(\d{4})", re.IGNORECASE)
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-# Phone: require a leading + (E.164-style), or a 10+ digit run that is NOT
-# also a YYYY-MM-DD date, to avoid matching a DOB as a phone number.
 _PHONE_RE = re.compile(r"(\+\d[\d\-\s]{8,14}\d)")
 _INTENT_RE = re.compile(
-    # Tolerates filler between "calling" and "about"/"regarding"
-    # ("calling today about...", "calling in about...") instead of requiring
-    # the exact literal phrase "calling about".
     r"calling(?:\s+\w+){0,3}\s+(?:about|regarding)\s+(.+?)(?:\.\s|\.$|,\s*(?:dob|my dob)|$)",
     re.IGNORECASE,
 )
@@ -60,9 +52,7 @@ def regex_fallback_extract(user_text: str) -> ExtractedTurn:
     if m := _POLICY_RE.search(user_text):
         out.claimed_fields["policy_number"] = m.group(1).upper()
 
-    if m := _LAST_FOUR_RE.search(user_text):
-        out.claimed_fields["id_last4"] = m.group(1)
-    elif m := _SSN4_RE.search(user_text):
+    if (m := _LAST_FOUR_RE.search(user_text)) or (m := _SSN4_RE.search(user_text)):
         out.claimed_fields["id_last4"] = m.group(1)
 
     if m := _EMAIL_RE.search(user_text):
