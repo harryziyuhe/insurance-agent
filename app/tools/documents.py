@@ -13,11 +13,6 @@ filled in.
 """
 from app.fixtures_data import DOCUMENT_GUIDELINE
 
-_NO_DOCUMENT_PHRASES = [
-    "don't have", "do not have", "dont have", "missing", "lost",
-    "can't find", "cannot find", "haven't got", "have not got",
-]
-
 # Fixture keys are wordier than what a caller will actually say, or than
 # claim["documents_needed"] entries ("original pathology report" vs.
 # "pathology report") — map each fixture key to the shorter phrases that
@@ -32,17 +27,23 @@ _DOC_CORE_TERMS = {
 }
 
 
-def _find_mentioned_document(user_text: str) -> str | None:
-    text = user_text.lower()
+def _match_doc_key(text: str) -> str | None:
+    text = text.lower()
     for doc_key, core_terms in _DOC_CORE_TERMS.items():
         if any(term in text for term in core_terms):
             return doc_key
     return None
 
 
-def _mentions_not_having_it(user_text: str) -> bool:
-    text = user_text.lower()
-    return any(phrase in text for phrase in _NO_DOCUMENT_PHRASES)
+def _find_mentioned_document(user_text: str, mentioned_document: str | None = None) -> str | None:
+    # Prefer the LLM-extracted mention (understand() reads the whole message
+    # semantically, so it can resolve a reference like "that report you need
+    # from the doctor" that the raw keyword match below can't) — fall back to
+    # matching the raw text directly when nothing was extracted (LLMUnavailable,
+    # or the phrase didn't map to a name the extractor recognized).
+    if mentioned_document and (matched := _match_doc_key(mentioned_document)):
+        return matched
+    return _match_doc_key(user_text)
 
 
 def _fill_template(text: str, claim: dict) -> str:
@@ -57,7 +58,13 @@ def _fill_template(text: str, claim: dict) -> str:
     )
 
 
-def get_document_guideline(claim: dict, user_text: str, intent: str) -> str:
+def get_document_guideline(
+    claim: dict,
+    user_text: str,
+    intent: str,
+    mentioned_document: str | None = None,
+    lacks_document: bool = False,
+) -> str:
     doc_guidance = DOCUMENT_GUIDELINE["document_guidance"]
     doc_alt_guidance = DOCUMENT_GUIDELINE["document_alternative_guidance"]
     followup_guidance = DOCUMENT_GUIDELINE["claim_followup_guidance"]
@@ -66,9 +73,9 @@ def get_document_guideline(claim: dict, user_text: str, intent: str) -> str:
     requires_documents = bool(claim.get("documents_needed"))
 
     # 1/2. Named-document check first — most specific signal available.
-    doc_key = _find_mentioned_document(user_text)
+    doc_key = _find_mentioned_document(user_text, mentioned_document)
     if doc_key:
-        if _mentions_not_having_it(user_text):
+        if lacks_document:
             alt = doc_alt_guidance.get(doc_key, doc_alt_guidance["default"])
             return _fill_template(alt["en"], claim)
         if doc_key in doc_guidance:
