@@ -1,5 +1,6 @@
-from app.session import SessionState
 from app.fixtures_data import CONSENT_SCENARIOS
+from app.session import SessionState
+
 
 def check_status(session: SessionState, case_id: str, scenario: str = "default") -> str:
     seq = CONSENT_SCENARIOS[scenario]["status_sequence"]

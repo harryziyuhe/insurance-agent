@@ -1,9 +1,6 @@
-"""Phase dispatch table (ARCHITECTURE.md §6). Milestone 1 only implements
-VERIFY_ID; later phases are added here without touching the pipeline.
-"""
 from app.extraction import ExtractedTurn
 from app.session import Phase, SessionState
-from app.sop import post_process, process_case, verify_id, resolve_intent
+from app.sop import post_process, process_case, resolve_intent, verify_id
 
 
 def handle_turn(session: SessionState, user_text: str, extracted: ExtractedTurn) -> str:

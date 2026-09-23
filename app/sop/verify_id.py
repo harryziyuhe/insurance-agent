@@ -1,11 +1,3 @@
-"""VERIFY_ID phase controller (ARCHITECTURE.md §6.1 + §7).
-
-Strict phase: this module is the only place allowed to decide verification,
-and it never reads memory.intent_hint to act on it — only the pipeline (which
-runs extraction before dispatch) writes to memory. That separation is what
-makes "remembers the hint but doesn't act on it here" structural rather than
-a prompting hope.
-"""
 from app.extraction import ExtractedTurn
 from app.identity import PII_FIELDS, match_identity, match_representative
 from app.pipeline import respond
@@ -13,8 +5,7 @@ from app.session import Phase, SessionState
 
 REQUIRED_MATCHES = 3
 ALL_FIELDS_PROMPT = (
-    "full name, date of birth, phone number, email, or the last 4 digits of "
-    "your SSN/ID"
+    "full name, date of birth, phone number, email, or the last 4 digits of your SSN/ID"
 )
 
 _FIELD_LABELS = {
@@ -29,10 +20,7 @@ _FIELD_LABELS = {
 def _labels(fields) -> str:
     return ", ".join(_FIELD_LABELS.get(f, f) for f in fields)
 
-# If verification is still unresolved after this many turns, stop asking for
-# more fields and proactively offer a human rep instead — a caller who's
-# stuck this long is more frustrated than helped by another repeat of the
-# same prompt (ARCHITECTURE.md §2 point 5, escalation as a first-class exit).
+
 MAX_VERIFICATION_ATTEMPTS = 10
 
 
@@ -53,8 +41,6 @@ def handle(session: SessionState, extracted: ExtractedTurn) -> str:
         session.memory.intent_hint = extracted.intent_hint
 
     identity.verification_attempts += 1
-    # Very first turn of the whole call — greet warmly before anything else,
-    # regardless of which branch below ends up firing.
     first_turn = identity.verification_attempts == 1
 
     # --- representative path (ARCHITECTURE.md §7.1) ---
@@ -80,7 +66,6 @@ def handle(session: SessionState, extracted: ExtractedTurn) -> str:
             return _escalate_reply(session, extracted.emotion)
         return _in_progress_reply(identity, result, extracted.emotion, first_turn)
 
-    # --- standard self-verification path ---
     result = match_identity(identity.claimed_fields)
     identity.matched_fields = result.matched_fields
 
@@ -115,10 +100,10 @@ def _verified_reply(session: SessionState, first_turn: bool = False) -> str:
     if session.memory.intent_hint:
         next_action = f"tell the caller they're verified and that you'll pick up their earlier mention of {session.memory.intent_hint}"
     else:
-        next_action = "tell the caller they're verified and ask for what they need help with"
+        next_action = (
+            "tell the caller they're verified and ask for what they need help with"
+        )
 
-    # A caller can be verified on their very first message (e.g. they front-load
-    # every field before we ask) — still deserves a warm greeting first.
     return respond(facts_to_convey, _greeting_prefix(first_turn) + next_action)
 
 
@@ -126,15 +111,12 @@ def _in_progress_reply(identity, result, emotion, first_turn: bool = False) -> s
     facts_to_convey = []
 
     have = len(result.matched_fields)
-    # Fields the caller actually gave a value for, but that didn't match the
-    # account on file — as opposed to fields they simply haven't given yet.
     wrong_fields = [
-        f for f in PII_FIELDS
+        f
+        for f in PII_FIELDS
         if identity.claimed_fields.get(f) and f not in result.matched_fields
     ]
-    # Fields never mentioned at all — the only ones worth asking for. Once a
-    # field is matched (or even given-but-wrong), re-asking for it is what
-    # makes the prompt confusing, so we never suggest it again here.
+
     unprovided_fields = [f for f in PII_FIELDS if f not in identity.claimed_fields]
 
     greeting = _greeting_prefix(first_turn)

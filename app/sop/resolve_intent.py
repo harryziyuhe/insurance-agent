@@ -1,6 +1,6 @@
+from app.extraction import ExtractedTurn
 from app.pipeline import respond
 from app.session import Phase, SessionState
-from app.extraction import ExtractedTurn
 from app.sop import process_case
 from app.tools.claims import filter_claims, list_claims
 
@@ -10,9 +10,6 @@ def handle(session: SessionState, user_text: str, extracted: ExtractedTurn) -> s
     if not claims:
         return _no_claim_reply()
 
-    # Combine what we already knew with whatever's new this turn — this must
-    # not be an `or` chain, or a clarifying answer given after memory.intent_hint
-    # is already set would be silently discarded (see PII narrowing note below).
     new_text = extracted.intent_hint or user_text
     hint_text = " ".join(t for t in (session.memory.intent_hint, new_text) if t)
     if not hint_text:
@@ -25,13 +22,10 @@ def handle(session: SessionState, user_text: str, extracted: ExtractedTurn) -> s
     if len(candidates) == 1:
         case = candidates[0]
         session.intent.case_id = case["case_id"]
-        session.intent.resolved_intent = extracted.intent_category or "general_claim_question"
+        session.intent.resolved_intent = (
+            extracted.intent_category or "general_claim_question"
+        )
         session.phase = Phase.PROCESS_CASE
-        # The caller very often states exactly what they want in the same
-        # message that resolves which claim they mean (e.g. "...my denied
-        # claim, why was it denied?") — hand off to PROCESS_CASE's logic in
-        # this same turn instead of saying a placeholder "let's go over it"
-        # and forcing them to repeat the question next turn.
         return process_case.handle(session, user_text, extracted)
 
     return _clarify_ambiguous_reply(candidates)

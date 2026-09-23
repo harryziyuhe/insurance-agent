@@ -1,30 +1,26 @@
-"""Deterministic identity verification against fixtures/policyholders.json
-and fixtures/representatives.json. See ARCHITECTURE.md §7.
-
-This is intentionally plain code, not an LLM call: verification math must be
-reproducible and auditable, and the phase controller (not the model) decides
-when the >=3-field gate is satisfied.
-"""
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from app.fixtures_data import POLICYHOLDERS, REPRESENTATIVES
 
-# Formats a caller might plausibly say a date of birth in. Tried in order;
-# first one that parses wins. Kept deliberately plain-code (no dateutil dep)
-# since this feeds an auditable verification decision.
 _DOB_FORMATS = [
-    "%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y", "%Y%m%d",
-    "%B %d, %Y", "%B %d %Y", "%d %B %Y", "%Y %B %d",
-    "%b %d, %Y", "%b %d %Y", "%d %b %Y", "%Y %b %d",
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%Y%m%d",
+    "%B %d, %Y",
+    "%B %d %Y",
+    "%d %B %Y",
+    "%Y %B %d",
+    "%b %d, %Y",
+    "%b %d %Y",
+    "%d %b %Y",
+    "%Y %b %d",
 ]
 
 
-# A date-shaped substring, tried when the full string doesn't parse outright —
-# guards against filler words around the actual date ("dob is March 15, 1985",
-# "on 1985-03-15") from whatever produced the string (caller phrasing, or an
-# LLM extraction that echoed a bit more of the sentence than just the value).
 _DATE_SUBSTRING_RE = re.compile(
     r"\d{4}-\d{1,2}-\d{1,2}|\d{1,2}/\d{1,2}/\d{4}|\d{8}\b|"
     r"[A-Za-z]+\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\s+[A-Za-z]+\.?\s+\d{4}|\d{4}\s+[A-Za-z]+\.?\s+\d{1,2}"
@@ -43,8 +39,7 @@ def _parse_date(s: str | None):
                 continue
     return None
 
-# Fields that count toward the >=3-of-5 requirement. Policy number is accepted
-# as a narrowing hint but does not count (see ARCHITECTURE.md §7).
+
 PII_FIELDS = ["full_name", "dob", "phone", "email", "id_last4"]
 
 
@@ -85,14 +80,10 @@ def _dob_matches(claimed: str, record: dict) -> bool:
     record_date = _parse_date(record.get("dob"))
     if claimed_date and record_date:
         return claimed_date == record_date
-    # Neither side parsed cleanly (unexpected format) — fall back to the
-    # literal string comparison rather than silently rejecting the match.
     return _norm(claimed) == _norm(record.get("dob"))
 
 
 def _id_last4_matches(claimed: str, record: dict) -> bool:
-    # accepted regardless of whether record.id_type is ssn_last4 or
-    # national_id_last4 — caller shouldn't need to know which one applies.
     return _digits(claimed) == _digits(record.get("id_last4"))
 
 
@@ -110,7 +101,7 @@ class MatchResult:
     party_id: str | None = None
     matched_fields: list[str] = field(default_factory=list)
     verified: bool = False
-    ambiguous: bool = False  # multiple records tied at >=3 matches
+    ambiguous: bool = False
 
 
 def match_identity(claimed_fields: dict) -> MatchResult:
@@ -120,11 +111,9 @@ def match_identity(claimed_fields: dict) -> MatchResult:
     scored: list[tuple[str, list[str]]] = []
     for record in POLICYHOLDERS:
         matched = []
-        # policy_number narrows candidates but isn't a counted PII field
         if claimed_fields.get("policy_number") and _norm(
             claimed_fields["policy_number"]
         ) != _norm(record.get("policy_number")):
-            # explicit mismatch on policy number rules this record out entirely
             continue
         for field_name in PII_FIELDS:
             claimed_value = claimed_fields.get(field_name)
@@ -147,9 +136,7 @@ def match_identity(claimed_fields: dict) -> MatchResult:
 
     tied = [pid for pid, m in scored if len(m) == best_count]
     if len(tied) > 1:
-        return MatchResult(
-            party_id=None, matched_fields=best_matched, ambiguous=True
-        )
+        return MatchResult(party_id=None, matched_fields=best_matched, ambiguous=True)
 
     return MatchResult(
         party_id=best_party_id, matched_fields=best_matched, verified=True
@@ -162,10 +149,9 @@ class RepresentativeMatch:
     buyer_party_id: str | None = None
 
 
-def match_representative(rep_name: str, relationship: str | None, buyer_name: str | None) -> RepresentativeMatch:
-    """Checks the rep's claimed name/relationship/buyer against
-    fixtures/representatives.json. See ARCHITECTURE.md §7.1.
-    """
+def match_representative(
+    rep_name: str, relationship: str | None, buyer_name: str | None
+) -> RepresentativeMatch:
     rep_name_n = _norm(rep_name)
     for row in REPRESENTATIVES:
         if _norm(row["rep_name"]) != rep_name_n:

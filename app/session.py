@@ -1,7 +1,3 @@
-"""SessionState (ARCHITECTURE.md §4) — trimmed to what milestone 1 needs
-(VERIFY_ID only). Fields for later phases are stubbed in so the shape won't
-need to change when RESOLVE_INTENT/PROCESS_CASE/POST_PROCESS are added.
-"""
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -33,15 +29,18 @@ class MemoryState:
     case_hint_type: str | None = None
     case_hint_period: str | None = None
 
+
 @dataclass
 class IntentState:
     resolved_intent: str | None = None
     case_id: str | None = None
 
+
 @dataclass
 class CaseState:
     topics_covered: list[str] = field(default_factory=list)
     status_poll_index: dict[str, int] = field(default_factory=dict)
+
 
 @dataclass
 class PostProcessState:
@@ -50,21 +49,21 @@ class PostProcessState:
     email_consent: str | None = None
     email_sent: bool = False
 
+
 @dataclass
 class SessionState:
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     phase: Phase = Phase.VERIFY_ID
-    turns: list = field(default_factory=list)  # [{"role": "user"|"agent", "text": str}]
+    turns: list = field(default_factory=list)
     identity: IdentityState = field(default_factory=IdentityState)
     memory: MemoryState = field(default_factory=MemoryState)
     intent: IntentState = field(default_factory=IntentState)
     case: CaseState = field(default_factory=CaseState)
     post_process: PostProcessState = field(default_factory=PostProcessState)
     off_topic_streak: int = 0
-    last_extracted: dict = field(default_factory=dict)  # debug: understand() output for the most recent turn
+    last_extracted: dict = field(default_factory=dict)
 
-# In-memory store for the demo. Swap for Redis if the process needs to
-# restart without losing live sessions (see ARCHITECTURE.md §4).
+
 _SESSIONS: dict[str, SessionState] = {}
 
 

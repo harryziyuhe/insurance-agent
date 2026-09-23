@@ -1,7 +1,3 @@
-"""FastAPI app — see ARCHITECTURE.md §13 for the intended full API surface.
-Milestone 1: session create + message turn, VERIFY_ID phase only, stubbed
-extraction (no LLM call yet).
-"""
 from dataclasses import asdict
 
 from fastapi import FastAPI, HTTPException

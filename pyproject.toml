@@ -1,0 +1,7 @@
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+exclude = [".venv", "fixtures", "web"]
+
+[tool.ruff.format]
+quote-style = "double"

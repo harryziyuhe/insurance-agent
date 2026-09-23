@@ -4,13 +4,12 @@ import os
 
 import groq
 from dotenv import load_dotenv
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types
 from groq import Groq
 
-from google import genai
-from google.genai import types
-from google.genai import errors as genai_errors
-
-load_dotenv()  # reads .env (gitignored); see .env.example for the keys this needs
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -68,12 +67,6 @@ _GEMINI_TO_JSON_TYPE = {
 
 
 def _to_strict_json_schema(node: dict) -> dict:
-    """Translate our canonical Gemini-dialect schema (used by pipeline.py) into
-    the strict JSON Schema dialect Groq/OpenAI-compatible structured output
-    requires: every property listed in `required` (nullability is expressed as
-    a type union instead of omission), and `additionalProperties: False` on
-    every object. Keeps pipeline.py's schema definitions vendor-neutral —
-    only this translation is Groq-specific."""
     json_type = _GEMINI_TO_JSON_TYPE.get(node.get("type"), node.get("type"))
     out: dict = {}
 
@@ -89,7 +82,9 @@ def _to_strict_json_schema(node: dict) -> dict:
         out["enum"] = list(node["enum"]) + ([None] if node.get("nullable") else [])
 
     if json_type == "object" and "properties" in node:
-        out["properties"] = {k: _to_strict_json_schema(v) for k, v in node["properties"].items()}
+        out["properties"] = {
+            k: _to_strict_json_schema(v) for k, v in node["properties"].items()
+        }
         out["required"] = list(node["properties"].keys())
         out["additionalProperties"] = False
 
@@ -139,7 +134,9 @@ def _call_gemini(system: str, user: str, schema: dict, temperature: float) -> di
     )
 
     try:
-        response = client.models.generate_content(model=GEMINI_MODEL, contents=user, config=config)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL, contents=user, config=config
+        )
     except genai_errors.ClientError as e:
         logger.warning("Gemini call failed (client error): %s", e)
         raise LLMUnavailable(str(e)) from e
@@ -158,11 +155,6 @@ def _call_gemini(system: str, user: str, schema: dict, temperature: float) -> di
         raise LLMUnavailable(f"malformed JSON from Gemini: {e}") from e
 
 
-# Tried in order; each entry is (name, fn). Groq is the default provider
-# (generous free tier, guaranteed-schema strict mode); Gemini is the backup
-# if Groq is rate-limited or down. Callers only see LLMUnavailable if every
-# provider in the chain fails, at which point they fall back to the
-# deterministic regex/template path (see pipeline.py).
 _PROVIDERS = (
     ("Groq", _call_groq),
     ("Gemini", _call_gemini),
