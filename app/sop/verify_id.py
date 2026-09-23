@@ -7,7 +7,8 @@ makes "remembers the hint but doesn't act on it here" structural rather than
 a prompting hope.
 """
 from app.extraction import ExtractedTurn
-from app.identity import match_identity, match_representative
+from app.identity import PII_FIELDS, match_identity, match_representative
+from app.pipeline import respond
 from app.session import Phase, SessionState
 
 REQUIRED_MATCHES = 3
@@ -15,6 +16,24 @@ ALL_FIELDS_PROMPT = (
     "full name, date of birth, phone number, email, or the last 4 digits of "
     "your SSN/ID"
 )
+
+_FIELD_LABELS = {
+    "full_name": "full name",
+    "dob": "date of birth",
+    "phone": "phone number",
+    "email": "email",
+    "id_last4": "last 4 digits of your SSN/ID",
+}
+
+
+def _labels(fields) -> str:
+    return ", ".join(_FIELD_LABELS.get(f, f) for f in fields)
+
+# If verification is still unresolved after this many turns, stop asking for
+# more fields and proactively offer a human rep instead — a caller who's
+# stuck this long is more frustrated than helped by another repeat of the
+# same prompt (ARCHITECTURE.md §2 point 5, escalation as a first-class exit).
+MAX_VERIFICATION_ATTEMPTS = 10
 
 
 def handle(session: SessionState, extracted: ExtractedTurn) -> str:
@@ -34,6 +53,9 @@ def handle(session: SessionState, extracted: ExtractedTurn) -> str:
         session.memory.intent_hint = extracted.intent_hint
 
     identity.verification_attempts += 1
+    # Very first turn of the whole call — greet warmly before anything else,
+    # regardless of which branch below ends up firing.
+    first_turn = identity.verification_attempts == 1
 
     # --- representative path (ARCHITECTURE.md §7.1) ---
     if identity.caller_role == "representative":
@@ -53,8 +75,10 @@ def handle(session: SessionState, extracted: ExtractedTurn) -> str:
             identity.party_id = rep_match.buyer_party_id or result.party_id
             identity.matched_fields = result.matched_fields
             session.phase = Phase.RESOLVE_INTENT
-            return _verified_reply(session)
-        return _in_progress_reply(identity, result)
+            return _verified_reply(session, first_turn)
+        if identity.verification_attempts >= MAX_VERIFICATION_ATTEMPTS:
+            return _escalate_reply(session, extracted.emotion)
+        return _in_progress_reply(identity, result, extracted.emotion, first_turn)
 
     # --- standard self-verification path ---
     result = match_identity(identity.claimed_fields)
@@ -64,44 +88,86 @@ def handle(session: SessionState, extracted: ExtractedTurn) -> str:
         identity.verified = True
         identity.party_id = result.party_id
         session.phase = Phase.RESOLVE_INTENT
-        return _verified_reply(session)
+        return _verified_reply(session, first_turn)
+
+    if identity.verification_attempts >= MAX_VERIFICATION_ATTEMPTS:
+        return _escalate_reply(session, extracted.emotion)
 
     if result.ambiguous:
-        return (
-            "I have a couple of possible matches with what you've given me so far. "
-            f"Could you also confirm your {ALL_FIELDS_PROMPT}?"
+        unprovided_fields = [f for f in PII_FIELDS if f not in identity.claimed_fields]
+        greeting = _greeting_prefix(first_turn)
+        next_action = (
+            f"{greeting}tell the caller you have a couple of possible matches with what "
+            f"they've given so far and ask them to also confirm their "
+            f"{_labels(unprovided_fields) if unprovided_fields else ALL_FIELDS_PROMPT}"
         )
+        return respond([], next_action, extracted.emotion)
 
-    return _in_progress_reply(identity, result)
+    return _in_progress_reply(identity, result, extracted.emotion, first_turn)
 
 
-def _verified_reply(session: SessionState) -> str:
+def _greeting_prefix(first_turn: bool) -> str:
+    return "Start with a warm, friendly greeting, then " if first_turn else ""
+
+
+def _verified_reply(session: SessionState, first_turn: bool = False) -> str:
+    facts_to_convey = []
     if session.memory.intent_hint:
-        return (
-            "Thanks, you're verified. I have a note that you're calling about "
-            f"{session.memory.intent_hint} — let's pick up there."
-        )
-    return "Thanks, you're verified. What can I help you with today?"
+        next_action = f"tell the caller they're verified and that you'll pick up their earlier mention of {session.memory.intent_hint}"
+    else:
+        next_action = "tell the caller they're verified and ask for what they need help with"
+
+    # A caller can be verified on their very first message (e.g. they front-load
+    # every field before we ask) — still deserves a warm greeting first.
+    return respond(facts_to_convey, _greeting_prefix(first_turn) + next_action)
 
 
-def _in_progress_reply(identity, result) -> str:
+def _in_progress_reply(identity, result, emotion, first_turn: bool = False) -> str:
+    facts_to_convey = []
+
     have = len(result.matched_fields)
+    # Fields the caller actually gave a value for, but that didn't match the
+    # account on file — as opposed to fields they simply haven't given yet.
+    wrong_fields = [
+        f for f in PII_FIELDS
+        if identity.claimed_fields.get(f) and f not in result.matched_fields
+    ]
+    # Fields never mentioned at all — the only ones worth asking for. Once a
+    # field is matched (or even given-but-wrong), re-asking for it is what
+    # makes the prompt confusing, so we never suggest it again here.
+    unprovided_fields = [f for f in PII_FIELDS if f not in identity.claimed_fields]
+
+    greeting = _greeting_prefix(first_turn)
 
     if not identity.claimed_fields:
-        return (
-            "Before I can discuss any claim details, I need to verify your identity. "
-            f"Could you provide your {ALL_FIELDS_PROMPT}? I'll need at least "
-            f"{REQUIRED_MATCHES} of those."
+        next_action = f"{greeting}tell the caller they need to have their identity verified. They need to provide at least {REQUIRED_MATCHES} of {ALL_FIELDS_PROMPT} information"
+
+    elif wrong_fields:
+        if unprovided_fields:
+            alternative = f"provide a different piece of ID they haven't given yet, such as {_labels(unprovided_fields)}"
+        else:
+            alternative = "double-check that value, since they've already given every other accepted form of ID"
+        next_action = (
+            f"{greeting}tell the caller the {_labels(wrong_fields)} they gave doesn't match what's on file "
+            f"({have} of {REQUIRED_MATCHES} pieces confirmed so far). Ask them to double-check that "
+            f"value, or {alternative}"
         )
 
-    if have == 0:
-        return (
-            "I wasn't able to match what you provided to an account on file. "
-            f"Could you double-check and provide your {ALL_FIELDS_PROMPT}?"
+    else:
+        next_action = (
+            f"{greeting}tell the caller that you have {have} of the {REQUIRED_MATCHES} pieces of "
+            f"identification needed ({_labels(result.matched_fields)} confirmed). Ask them to provide "
+            f"one more, such as their {_labels(unprovided_fields)}"
         )
 
-    return (
-        f"Thanks — I have {have} of the {REQUIRED_MATCHES} pieces of "
-        "identification I need. Could you provide one more, such as your "
-        f"{ALL_FIELDS_PROMPT}?"
+    return respond(facts_to_convey, next_action, emotion)
+
+
+def _escalate_reply(session: SessionState, emotion: str) -> str:
+    session.phase = Phase.HUMAN_HANDOFF
+    next_action = (
+        "apologize that verifying their identity is taking longer than it should, "
+        "and let them know you're connecting them with a human representative who "
+        "can verify them another way"
     )
+    return respond([], next_action, emotion)
