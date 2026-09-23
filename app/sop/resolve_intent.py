@@ -1,6 +1,8 @@
+from app.pipeline import respond
 from app.session import Phase, SessionState
 from app.extraction import ExtractedTurn
-from app.tools.claims import classify_intent, filter_claims, list_claims
+from app.sop import process_case
+from app.tools.claims import filter_claims, list_claims
 
 
 def handle(session: SessionState, user_text: str, extracted: ExtractedTurn) -> str:
@@ -23,22 +25,26 @@ def handle(session: SessionState, user_text: str, extracted: ExtractedTurn) -> s
     if len(candidates) == 1:
         case = candidates[0]
         session.intent.case_id = case["case_id"]
-        session.intent.resolved_intent = classify_intent(hint_text)
+        session.intent.resolved_intent = extracted.intent_category or "general_claim_question"
         session.phase = Phase.PROCESS_CASE
-        return _resolved_reply(case)
+        # The caller very often states exactly what they want in the same
+        # message that resolves which claim they mean (e.g. "...my denied
+        # claim, why was it denied?") — hand off to PROCESS_CASE's logic in
+        # this same turn instead of saying a placeholder "let's go over it"
+        # and forcing them to repeat the question next turn.
+        return process_case.handle(session, user_text, extracted)
 
     return _clarify_ambiguous_reply(candidates)
 
 
 def _no_claim_reply() -> str:
-    return (
-        "I am sorry, but I do not have a claim for you on file. "
-        "Would you like to speak to a representative?"
-    )
+    next_action = "tell the caller that you do not have a claim for them on file and ask whether they want to speak to a representative"
+    return respond([], next_action)
 
 
 def _clarify_reply() -> str:
-    return "Can you please clarify what I can help you with today?"
+    next_action = "ask the caller to clarify their intent for calling"
+    return respond([], next_action)
 
 
 def _clarify_ambiguous_reply(candidates: list[dict]) -> str:
@@ -47,10 +53,3 @@ def _clarify_ambiguous_reply(candidates: list[dict]) -> str:
         for c in candidates
     )
     return f"I see a few claims that could match: {options}. Which one are you calling about?"
-
-
-def _resolved_reply(case: dict) -> str:
-    return (
-        f"I found your {case['case_type']} claim ({case['case_id']}), "
-        f"currently {case['status']}. Let's go over it."
-    )
