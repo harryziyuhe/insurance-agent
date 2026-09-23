@@ -17,8 +17,6 @@ class MessageIn(BaseModel):
 class MessageOut(BaseModel):
     reply: str
     phase: str
-    verified: bool
-    matched_fields: list[str]
 
 
 @app.post("/api/session")
@@ -38,8 +36,6 @@ def post_message(session_id: str, body: MessageIn):
     return MessageOut(
         reply=reply,
         phase=session.phase.value,
-        verified=session.identity.verified,
-        matched_fields=session.identity.matched_fields,
     )
 
 
