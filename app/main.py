@@ -2,13 +2,14 @@
 Milestone 1: session create + message turn, VERIFY_ID phase only, stubbed
 extraction (no LLM call yet).
 """
+from dataclasses import asdict
+
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.extraction import extract
-from app.session import Phase, create_session, get_session
-from app.sop.engine import handle_turn
+from app import pipeline
+from app.session import create_session, get_session
 
 app = FastAPI(title="Insurance Claims SOP Agent")
 
@@ -36,12 +37,7 @@ def post_message(session_id: str, body: MessageIn):
     if session is None:
         raise HTTPException(status_code=404, detail="unknown session_id")
 
-    session.turns.append({"role": "user", "text": body.text})
-
-    extracted = extract(body.text)
-    reply = handle_turn(session, body.text, extracted)
-
-    session.turns.append({"role": "agent", "text": reply})
+    reply = pipeline.run_turn(session, body.text)
 
     return MessageOut(
         reply=reply,
@@ -53,17 +49,16 @@ def post_message(session_id: str, body: MessageIn):
 
 @app.get("/api/session/{session_id}/state")
 def get_state(session_id: str):
-    """Debug-only endpoint: dumps full session state for demo transparency."""
+    """Debug-only endpoint: dumps the entire SessionState (every sub-dataclass,
+    plus last_extracted — the most recent understand() output) for demo
+    transparency. Deliberately not curated to specific fields so new
+    SessionState fields show up here automatically."""
     session = get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="unknown session_id")
-    return {
-        "session_id": session.session_id,
-        "phase": session.phase.value,
-        "identity": vars(session.identity),
-        "memory": vars(session.memory),
-        "turns": session.turns,
-    }
+    state = asdict(session)
+    state["phase"] = session.phase.value
+    return state
 
 
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
